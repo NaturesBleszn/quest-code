@@ -1,0 +1,52 @@
+name: Notion Status Sync
+
+on:
+  issues:
+    types: [opened, assigned, closed, reopened, unassigned]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Map GitHub event to Notion status
+        id: map_status
+        run: |
+          ACTION="${{ github.event.action }}"
+          if [ "$ACTION" = "opened" ]; then
+            echo "status=Backlog" >> $GITHUB_OUTPUT
+          elif [ "$ACTION" = "assigned" ]; then
+            echo "status=In Progress" >> $GITHUB_OUTPUT
+          elif [ "$ACTION" = "closed" ]; then
+            echo "status=Done" >> $GITHUB_OUTPUT
+          elif [ "$ACTION" = "reopened" ]; then
+            echo "status=In Progress" >> $GITHUB_OUTPUT
+          elif [ "$ACTION" = "unassigned" ]; then
+            echo "status=Backlog" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update Notion status
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          STATUS: ${{ steps.map_status.outputs.status }}
+        run: |
+          # Find the Notion page matching this GitHub Issue URL and update its status
+          PAGE=$(curl -s -X POST "https://api.notion.com/v1/databases/${NOTION_DATABASE_ID}/query" \
+            -H "Authorization: Bearer ${NOTION_API_KEY}" \
+            -H "Notion-Version: 2022-06-28" \
+            -H "Content-Type: application/json" \
+            -d "{\"filter\":{\"property\":\"GitHub Issue URL\",\"url\":{\"equals\":\"${ISSUE_URL}\"}}}")
+
+          PAGE_ID=$(echo "$PAGE" | python3 -c "import sys,json; results=json.load(sys.stdin)['results']; print(results[0]['id'] if results else '')" 2>/dev/null)
+
+          if [ -n "$PAGE_ID" ]; then
+            curl -s -X PATCH "https://api.notion.com/v1/pages/${PAGE_ID}" \
+              -H "Authorization: Bearer ${NOTION_API_KEY}" \
+              -H "Notion-Version: 2022-06-28" \
+              -H "Content-Type: application/json" \
+              -d "{\"properties\":{\"Status\":{\"select\":{\"name\":\"${STATUS}\"}}}}"
+            echo "Updated Notion page $PAGE_ID to status: $STATUS"
+          else
+            echo "No Notion page found for issue URL: $ISSUE_URL"
+          fi
