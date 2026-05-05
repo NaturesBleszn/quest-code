@@ -33,7 +33,7 @@ export default function QuestBattle() {
     setStatus('searching');
     
     // Connect to Socket.IO server
-    const socket = io();
+            const socket = io(import.meta.env.VITE_BACKEND_URL || window.location.origin);
     socketRef.current = socket;
 
     socket.on("connect", () => {
